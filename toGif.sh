@@ -17,42 +17,50 @@
 #create a gif preview of a 2 blocks of a video using exploiting cuda hw accelaration
 #try to get blkFrames every srcSamplingDistSec, picking in each block every 1/srcSampling secs, for blocksN blocks
 
-#usage videoPath [FFMPEG, DISABLECUDA -> get the gif preview with standard reencoding ]
 set -e 
-
+if [ $1 == "-h" ];then echo "usage: <vidPath>, export: [DISABLECUDA SLEEP_OVERHEATING  FFMPEG FFPROBE LIMITOUTFRAMES FULL_NAMEID]";exit 1;fi
 ffmpeg=" ~/ffmpeg " #path to ffmpeg build (fine distro pkg bin, simply ffmpeg 
+ffprobe="~/ffprobe"
 #ffmpeg="/bin/nv/ffmpeg_g"
 if [ $FFMPEG ];then ffmpeg=$FFMPEG;fi #custom path
-ffmpeg+=" -hide_banner -loglevel error -y "
-dur=$(ffprobe -loglevel error -show_entries stream=duration -select_streams v:0 -of csv=p=0 $1 2>&1) 
+if [ $FFPROBE ];then ffprobe=$FFPROBE;fi 
+
+ffmpeg+=" -hide_banner -loglevel error "
+dur=$( eval $ffprobe -hide_banner -loglevel error -show_entries stream=duration -select_streams v:0 -of csv=p=0 $1 2> /dev/null ) 
+if [ "$?" != 0 ];then echo "ERROR PROBE"; exit 1; fi
+
 dur=${dur%.*} #vid duration rounded in secs
 start=$(( dur / 4 )) #1st block start
-SMALL_VID=33
+SMALL_VID=12
 
-nameID="${1##*/}"
-nameID="${nameID%%.*}"
+filename="${1##*/}"       #last part of pathname
+nameID="${filename%%.*}"  
+if [ $FULL_NAMEID ];then nameID=$(echo $filename | tr . _ );fi
 #output in ./gif/nameID/nameID.gif (if CUDA also src tumbnails)
 mkdir -p "gifs"
 dstFolder=$(realpath gifs)/$nameID		#"/tmp/$nameID"
 mkdir -p $dstFolder 
 
-blocksN=4
-blkFrames=24			  #totNum of frames=blkFrames * blocksN
+blocksN=3
+blkFrames=10			  #totNum of frames=blkFrames * blocksN
 srcSampling=0.3
 srcSamplingDistSec=20 #1/srcSampling * blkFrames < srcSamplingDistSec ==> ensure sampled frames's time monotonic
 outFps=2
 seekCmd="-ss"
 
-if [ $dur -lt $SMALL_VID ];then 	#reconfigure for small videos
-		start=0 srcSampling=1.69 srcSamplingDistSec=4 srcSamplingDistSec=7 smallVid=1
+if [ "$dur" -lt "$SMALL_VID" ];then 	#reconfigure for small videos
+		start=0 srcSampling=1 srcSamplingDistSec=4 srcSamplingDistSec=7 smallVid=1
 fi
 	
 resize=" -resize 300x300 "  #cuda
 if [ $DISABLECUDA ];then	#SIMPLE NON HWACCELERATED
 	resize=" -vf scale=300x300 " #standard vid filter
 	limitOutFrames="-vframes $(( $blkFrames * $blocksN ))"
+	if [ $LIMITOUTFRAMES ];then limitOutFrames="-vframes "$LIMITOUTFRAMES ;fi
 	if [ $smallVid ];then limitOutFrames="" ;fi
-	eval $ffmpeg -ss $start -i $1 $resize -r $srcSampling  $limitOutFrames $dstFolder/$nameID.gif
+	eval $ffmpeg -n -ss $start -i $1 $resize -r $srcSampling  $limitOutFrames $dstFolder/$nameID.gif
+
+    if [ $SLEEP_OVERHEATING ];then sleep $SLEEP_OVERHEATING;fi
 	exit $?
 fi
 #if not enough time try to reconfig to save time
@@ -71,3 +79,4 @@ wait
 #merge extracted frames with desired speed
 eval $ffmpeg  -hide_banner -loglevel error  -y  -framerate $outFps -pattern_type glob   -i "$dstFolder/*.jpg"   -r $outFps     $dstFolder/$nameID.gif 
 #rm $dstFolder/*jpg #remove src tumbnails
+if [ $SLEEP_OVERHEATING ];then sleep $SLEEP_OVERHEATING;echo "sleept:"$SLEEP_OVERHEATING;fi
