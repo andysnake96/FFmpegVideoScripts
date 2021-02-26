@@ -18,16 +18,26 @@
 #try to get blkFrames every srcSamplingDistSec, picking in each block every 1/srcSampling secs, for blocksN blocks
 
 set -e 
-if [ $1 == "-h" ];then echo "usage: <vidPath>, export: [DISABLECUDA SLEEP_OVERHEATING  FFMPEG FFPROBE LIMITOUTFRAMES FULL_NAMEID]";exit 1;fi
+if [ $1 == "-h" ];then echo "usage: <vidPath>, export: [DISABLECUDA SLEEP_OVERHEATING PAD_ALWAYS FFMPEG FFPROBE LIMITOUTFRAMES FULL_NAMEID]";exit 1;fi
 ffmpeg=" ~/ffmpeg " #path to ffmpeg build (fine distro pkg bin, simply ffmpeg 
 ffprobe="~/ffprobe"
 #ffmpeg="/bin/nv/ffmpeg_g"
 if [ $FFMPEG ];then ffmpeg=$FFMPEG;fi #custom path
 if [ $FFPROBE ];then ffprobe=$FFPROBE;fi 
 
+#GET METADATA FOR SEEK AND SCALE
 ffmpeg+=" -hide_banner -loglevel error "
-dur=$( eval $ffprobe -hide_banner -loglevel error -show_entries stream=duration -select_streams v:0 -of csv=p=0 $1 2> /dev/null ) 
-if [ "$?" != 0 ];then echo "ERROR PROBE"; exit 1; fi
+trgtEntry="duration"
+dur=$( eval $ffprobe -hide_banner -loglevel error -show_entries stream=$trgtEntry -select_streams v:0 -of csv=p=0 $1 2> /dev/null ) 
+if [ "$?" != 0 ];then echo "ERROR PROBE dur"; exit 1; fi
+trgtEntry="width,height" #TODO NOT USED ,sample_aspect_ratio,display_aspect_ratio"
+resolutionMeta=$( eval $ffprobe -hide_banner -loglevel error -show_entries stream=$trgtEntry -select_streams v:0 -of csv=p=0 $1 2> /dev/null ) 
+if [ "$?" != 0 ];then echo "ERROR PROBE resolution"; exit 1; fi
+#parse csv output in W,H,SAR,DAR
+width=$(  echo $resolutionMeta   | awk -F "," '{print $1}' )
+height=$( echo $resolutionMeta  | awk -F "," '{print $2}' )
+#sar=$( echo $resolutionMeta     | awk -F "," '{print $3}' ) #TODO NOT USED
+#dar=$( echo $resolutionMeta     | awk -F "," '{print $4}' ) #TODO NOT USED
 
 dur=${dur%.*} #vid duration rounded in secs
 start=$(( dur / 4 )) #1st block start
@@ -55,10 +65,17 @@ fi
 resize=" -resize 300x300 "  #cuda
 if [ $DISABLECUDA ];then	#SIMPLE NON HWACCELERATED
 	resize=" -vf scale=300x300 " #standard vid filter
+    if [ $width -lt $height ];then  
+            #VERTICAL VIDEO => PAD WIDTH FROM ASPECT RATIO TO h=300 -> 300
+            resize=" -vf 'scale=-1:300,pad=300:300:(ow-iw)/2'   ";
+    elif [ $PAD_ALWAYS ];then #horizzonatal vid padded to have scaled height padded to 300
+            resize=" -vf 'scale=300:-1,pad=300:300:0:(oh-ih)/2' ";
+    fi
 	limitOutFrames="-vframes $(( $blkFrames * $blocksN ))"
 	if [ $LIMITOUTFRAMES ];then limitOutFrames="-vframes "$LIMITOUTFRAMES ;fi
 	if [ $smallVid ];then limitOutFrames="" ;fi
-	eval $ffmpeg -n -ss $start -i $1 $resize -r $srcSampling  $limitOutFrames $dstFolder/$nameID.gif
+	echo "$ffmpeg -n -ss $start -i $1 $resize -r $srcSampling  $limitOutFrames $dstFolder/$nameID.gif"
+	eval "$ffmpeg -n -ss $start -i $1 $resize -r $srcSampling  $limitOutFrames $dstFolder/$nameID.gif"
 
     if [ $SLEEP_OVERHEATING ];then sleep $SLEEP_OVERHEATING;fi
 	exit $?
@@ -72,6 +89,7 @@ fi
 for (( i=0; i<$blocksN; i+=1));do
 	#extract the frames using thumbnail_cuda also resizing the video stream to 300x300
 	s=$(( start + (i* srcSamplingDistSec) ))
+    #TODO CUDA SCALE VERTICAL VIDEO TODO ... if [[ $width < $height ]];then  
 	eval $ffmpeg -hide_banner -loglevel error -y -hwaccel cuvid -c:v h264_cuvid $resize $seekCmd $s -i $1 -vf	thumbnail_cuda=2,hwdownload,format=nv12 \
 		-vframes $blkFrames -r $srcSampling  $dstFolder/frame$i%02d.jpg &
 done
