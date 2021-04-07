@@ -264,3 +264,6 @@ concatDemuxerFFplayRnd(){
 #GEN  thumbnail HW DECODING + FILTERING
 #~/ffmpeg/bin/nv/ffmpeg_g -hwaccel cuvid -c:v h264_cuvid -resize 300x300 -i  -vf "thumbnail_cuda=2,hwdownload,format=nv12" -vframes 1 frame.jpg
 
+#from 1 video -> crop a core portion ( take colums [315,830] )-> duplicate the stream, on 1 mirror horiz. then overlay the 2 streams; slowPreset 
+#~/ffmpeg -i aa.mp4 -to 27.6 -filter_complex 'nullsrc=size=1028x720[base]; [0:v] crop=515:ih:315:0 [cropped] ; [cropped] split [tmp1][tmp2]; [tmp2] hflip [tmp2Mirr];[base][tmp1] overlay=shortest=1 [lx];[lx][tmp2Mirr] overlay=shortest=1:x=514' -preset veryslow -crf 11 /tmp/out.mp4
+

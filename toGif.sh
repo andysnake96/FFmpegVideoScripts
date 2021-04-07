@@ -41,7 +41,7 @@ height=$( echo $resolutionMeta  | awk -F "," '{print $2}' )
 
 dur=${dur%.*} #vid duration rounded in secs
 start=$(( dur / 4 )) #1st block start
-SMALL_VID=12
+SMALL_VID=10
 
 filename="${1##*/}"       #last part of pathname
 nameID="${filename%%.*}"  
